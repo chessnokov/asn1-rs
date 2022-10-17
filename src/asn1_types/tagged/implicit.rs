@@ -100,7 +100,24 @@ where
     T: ToDer,
 {
     fn to_der_len(&self) -> Result<usize> {
-        self.inner.to_der_len()
+        let mut sink = std::io::sink();
+        let inner_len = self
+            .inner
+            .write_der_content(&mut sink)
+            .map_err(|err| match err {
+                SerializeError::ASN1Error(err) => err,
+                SerializeError::InvalidClass { .. } => unreachable!(),
+                SerializeError::InvalidLength => Error::InvalidLength,
+                SerializeError::IOError(_) => unreachable!(),
+            })?;
+        let constructed = matches!(self.inner.tag(), Tag::Sequence | Tag::Set);
+        let header = Header::new(
+            Class::ContextSpecific,
+            constructed,
+            self.tag(),
+            Length::Definite(inner_len),
+        );
+        header.to_der_len().map(|header| header + inner_len)
     }
 
     fn write_der(&self, writer: &mut dyn std::io::Write) -> SerializeResult<usize> {
